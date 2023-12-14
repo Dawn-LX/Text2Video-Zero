@@ -1,7 +1,7 @@
 
 
 
-# Text2Video-Zero
+# Text2Video-Zero (https://github.com/Picsart-AI-Research/Text2Video-Zero)
 
 This repository is the official implementation of [Text2Video-Zero](https://arxiv.org/abs/2303.13439).
 

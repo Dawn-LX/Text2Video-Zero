@@ -13,11 +13,13 @@ from annotator.util import resize_image, HWC3
 from annotator.canny import CannyDetector
 from annotator.openpose import OpenposeDetector
 from annotator.midas import MidasDetector
-import decord
+# import decord
 
-apply_canny = CannyDetector()
-apply_openpose = OpenposeDetector()
-apply_midas = MidasDetector()
+# gkf: the following are used for controlnet based control signals, currently we don't need them
+# currently, we only use txt2video
+# apply_canny = CannyDetector()
+# apply_openpose = OpenposeDetector()
+# apply_midas = MidasDetector()
 
 
 def add_watermark(image, watermark_path, wm_rel_size=1/16, boundary=5):
@@ -194,7 +196,20 @@ class CrossFrameAttnProcessor:
         is_cross_attention = encoder_hidden_states is not None
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
-        elif attn.cross_attention_norm:
+        # elif attn.cross_attention_norm: # Text2Video-Zero uses diffusers==0.14.0
+        # elif attn.norm_cross is not None: # here we use diffusers==0.23.1
+        elif hasattr(attn,"norm_cross") and (attn.norm_cross is not None): # for both diffusers==0.14.0 and diffusers==0.23.1
+            '''gkf: NOTE
+                for diffusers==0.14.0: 
+                    attn.cross_attention_norm is `True` or `False`, and attn.norm_cross is `nn.LayerNorm`
+                refer to https://github.com/huggingface/diffusers/blob/f20c8f5a1aba27f5972cad50516f18ba516e4d9e/src/diffusers/models/cross_attention.py#L69
+
+                for diffusers==0.23.1: 
+                    `cross_attention_norm` can be `None`, "layer_norm", or "group_norm"
+                    , and `attn` does not store the `cross_attention_norm` as `self.cross_attention_norm`
+                    , instead, it uses self.norm_cross, which can be `None`, `nn.LayerNorm`, or `nn.GroupNorm`
+                refer to https://github.com/huggingface/diffusers/blob/4719b8f5f9714f1c0b3fd32addaf0f61a9939219/src/diffusers/models/attention_processor.py#L153
+            '''
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)

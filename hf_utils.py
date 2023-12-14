@@ -35,5 +35,17 @@ def get_model_list():
         "prompthero/openjourney",
     ]
 
-    model_list = best_model_list + model_list
+
+    # model_key = "stabilityai/stable-diffusion-2-1-base"
+    # gkf: we use the cache
+    model_key = "/home/zhaizhichao/.cache/huggingface/hub/models--stabilityai--stable-diffusion-2-1-base/snapshots/5ede9e4bf3e3fd1cb0ef2f7a3fff13ee514fdf06"
+    # this cache also saved at Windows desktop (D:\LargeModel_weights\huggingface_hub_cached_files\models--stabilityai--stable-diffusion-2-1-base)
+    
+    gkf_added = [
+        "stabilityai/stable-diffusion-2-1-base",
+        "/home/zhaizhichao/.cache/huggingface/hub/models--stabilityai--stable-diffusion-2-1-base/snapshots/5ede9e4bf3e3fd1cb0ef2f7a3fff13ee514fdf06"
+    ]
+    
+
+    model_list = best_model_list + model_list + gkf_added
     return model_list

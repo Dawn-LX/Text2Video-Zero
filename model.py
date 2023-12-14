@@ -76,6 +76,9 @@ class Model:
             kwargs['video_length'] = len(frame_ids)
         if self.model_type == ModelType.Text2Video:
             kwargs["frame_ids"] = frame_ids
+        
+        # print(frame_ids)
+        # assert False
         return self.pipe(prompt=prompt[frame_ids].tolist(),
                          negative_prompt=negative_prompt[frame_ids].tolist(),
                          latents=latents,
@@ -110,13 +113,14 @@ class Model:
         # Processing chunk-by-chunk
         if split_to_chunks:
             chunk_ids = np.arange(0, f, chunk_size - 1)
+            print(chunk_ids,f,chunk_size)
             result = []
             for i in range(len(chunk_ids)):
                 ch_start = chunk_ids[i]
                 ch_end = f if i == len(chunk_ids) - 1 else chunk_ids[i + 1]
                 frame_ids = [0] + list(range(ch_start, ch_end))
                 self.generator.manual_seed(seed)
-                print(f'Processing chunk {i + 1} / {len(chunk_ids)}')
+                print(f'Processing chunk {i + 1} / {len(chunk_ids)}, frame_ids={frame_ids}')
                 result.append(self.inference_chunk(frame_ids=frame_ids,
                                                    prompt=prompt,
                                                    negative_prompt=negative_prompt,

@@ -13,8 +13,13 @@ from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
 import PIL
 from PIL import Image
-from kornia.morphology import dilation
+from kornia.morphology import dilation 
+# gkf: 
+# kornia implement some low-level image processing operations which are directly compatible to torch, 
+# so that we don't need to convert a tensor to numpy and use cv2 to do these image processing operations and convert the results back
 
+# added by gkf, for debug:
+IS_DEBUG = False
 
 @dataclass
 class TextToVideoPipelineOutput(BaseOutput):
@@ -121,11 +126,17 @@ class TextToVideoPipeline(StableDiffusionPipeline):
         f = latents_local.shape[2]
 
         latents_local = rearrange(latents_local, "b c f w h -> (b f) c w h")
+        print(latents_local.shape) # (1,4,64,64)
+        # assert False
 
         latents = latents_local.detach().clone()
         x_t0_1 = None
         x_t1_1 = None
-
+        # print(timesteps)
+        # timesteps = [981, 961, 941, 921, 901, 881, 861, 841, 821, 801, 781, 761, 741, 721,
+        # 701, 681, 661, 641, 621, 601, 581, 561, 541, 521, 501, 481, 461, 441,
+        # 421, 401, 381, 361, 341, 321, 301, 281, 261, 241, 221, 201, 181, 161,
+        # 141, 121, 101,  81,  61,  41,  21,   1]
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if t > skip_t:
@@ -135,6 +146,7 @@ class TextToVideoPipeline(StableDiffusionPipeline):
                         print(
                             f"Continue DDIM with i = {i}, t = {t}, latent = {latents.shape}, device = {latents.device}, type = {latents.dtype}")
                         entered = True
+                        # assert False
 
                 latents = latents.detach()
                 # expand the latents if we are doing classifier free guidance
@@ -206,10 +218,8 @@ class TextToVideoPipeline(StableDiffusionPipeline):
         reference_flow = torch.zeros(
             (video_length-1, 2, 512, 512), device=latents.device, dtype=latents.dtype)
         for fr_idx, frame_id in enumerate(frame_ids):
-            reference_flow[fr_idx, 0, :,
-                           :] = motion_field_strength_x*(frame_id)
-            reference_flow[fr_idx, 1, :,
-                           :] = motion_field_strength_y*(frame_id)
+            reference_flow[fr_idx, 0, :,:] = motion_field_strength_x*(frame_id)
+            reference_flow[fr_idx, 1, :,:] = motion_field_strength_y*(frame_id)
         return reference_flow
 
     def create_motion_field_and_warp_latents(self, motion_field_strength_x, motion_field_strength_y, frame_ids, video_length, latents):
@@ -249,7 +259,7 @@ class TextToVideoPipeline(StableDiffusionPipeline):
         smooth_bg: bool = False,
         smooth_bg_strength: float = 0.4,
         t0: int = 44,
-        t1: int = 47,
+        t1: int = 47, # gkf: idx of diffusion steps (by default the total steps is 1000),  range 0 ~ 49
         **kwargs,
     ):
         frame_ids = kwargs.pop("frame_ids", list(range(video_length)))
@@ -290,7 +300,12 @@ class TextToVideoPipeline(StableDiffusionPipeline):
         # Encode input prompt
         text_embeddings = self._encode_prompt(
             prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt
-        )
+        )  # (2,77,1024)
+        if IS_DEBUG:
+            print(num_videos_per_prompt,prompt,negative_prompt)
+            print(text_embeddings.shape) # (2,77,1024)
+            # assert False
+
 
         # Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -302,21 +317,23 @@ class TextToVideoPipeline(StableDiffusionPipeline):
         num_channels_latents = self.unet.in_channels
 
         xT = self.prepare_latents(
-            batch_size * num_videos_per_prompt,
+            batch_size * num_videos_per_prompt, # bsz==1 as default, also, num_videos_per_prompt ==1
             num_channels_latents,
-            1,
+            1, # this is video_len
             height,
             width,
             text_embeddings.dtype,
             device,
-            generator,
+            generator,  # torch's generator for producing pseudo random numbers
             xT,
-        )
+        )  # shape == (1,4,1,64,64) == (bsz,num_channels_latents,video_len, H, W)
         dtype = xT.dtype
 
         # when motion field is not used, augment with random latent codes
         if use_motion_field:
-            xT = xT[:, :, :1]
+            xT = xT[:, :, :1] # (1,4,1,64,64)
+            # print(xT.shape)
+            # assert False
         else:
             if xT.shape[2] < video_length:
                 xT_missing = self.prepare_latents(
@@ -343,7 +360,7 @@ class TextToVideoPipeline(StableDiffusionPipeline):
         t0 = timesteps_ddpm[t0]
         t1 = timesteps_ddpm[t1]
 
-        print(f"t0 = {t0} t1 = {t1}")
+        print(f"t0 = {t0} t1 = {t1}")  # t0 = 881 t1 = 941
         x_t1_1 = None
 
         # Prepare extra step kwargs.
@@ -359,25 +376,34 @@ class TextToVideoPipeline(StableDiffusionPipeline):
                                       null_embs=null_embs, text_embeddings=text_embeddings, latents_local=xT, latents_dtype=dtype, guidance_scale=guidance_scale, guidance_stop_step=guidance_stop_step,
                                       callback=callback, callback_steps=callback_steps, extra_step_kwargs=extra_step_kwargs, num_warmup_steps=num_warmup_steps)
 
-        x0 = ddim_res["x0"].detach()
+        x0 = ddim_res["x0"].detach() # (1,4,1,64,64)
 
         if "x_t0_1" in ddim_res:
-            x_t0_1 = ddim_res["x_t0_1"].detach()
+            x_t0_1 = ddim_res["x_t0_1"].detach() # t0=881, (1,4,1,64,64)
         if "x_t1_1" in ddim_res:
-            x_t1_1 = ddim_res["x_t1_1"].detach()
+            x_t1_1 = ddim_res["x_t1_1"].detach() # t1=941, (1,4,1,64,64)
+
+        # print(x0.shape,x_t0_1.shape,x_t1_1.shape)
+        # assert False
+
         del ddim_res
         del xT
         if use_motion_field:
             del x0
 
             x_t0_k = x_t0_1[:, :, :1, :, :].repeat(1, 1, video_length-1, 1, 1)
+            # print(x_t0_k.shape)  # (1, 4, 7, 64, 64)
+            # print(frame_ids) # frame_ids = [0, 0, 1, 2, 3, 4, 5, 6]
+            # assert False
 
             reference_flow, x_t0_k = self.create_motion_field_and_warp_latents(
                 motion_field_strength_x=motion_field_strength_x, motion_field_strength_y=motion_field_strength_y, latents=x_t0_k, video_length=video_length, frame_ids=frame_ids[1:])
+            # gkf: reference_flow is only used for `smooth_bg=True`, ignore it for current
 
             # assuming t0=t1=1000, if t0 = 1000
             if t1 > t0:
-                x_t1_k = self.DDPM_forward(
+                
+                x_t1_k = self.DDPM_forward( # add noise
                     x0=x_t0_k, t0=t0, tMax=t1, device=device, shape=shape, text_embeddings=text_embeddings, generator=generator)
             else:
                 x_t1_k = x_t0_k
@@ -385,13 +411,22 @@ class TextToVideoPipeline(StableDiffusionPipeline):
             if x_t1_1 is None:
                 raise Exception
 
-            x_t1 = torch.cat([x_t1_1, x_t1_k], dim=2).clone().detach()
+            # x_t1_1: (bsz,n_channel,1,H,W); x_t1_k: (bsz,n_channel,7,H,W)
+            x_t1 = torch.cat([x_t1_1, x_t1_k], dim=2).clone().detach() # gkf: concat 1st frame and next k frames
+            # x_t1.shape == (1,4,8,64,64)
 
-            ddim_res = self.DDIM_backward(num_inference_steps=num_inference_steps, timesteps=timesteps, skip_t=t1, t0=-1, t1=-1, do_classifier_free_guidance=do_classifier_free_guidance,
-                                          null_embs=null_embs, text_embeddings=text_embeddings, latents_local=x_t1, latents_dtype=dtype, guidance_scale=guidance_scale,
-                                          guidance_stop_step=guidance_stop_step, callback=callback, callback_steps=callback_steps, extra_step_kwargs=extra_step_kwargs, num_warmup_steps=num_warmup_steps)
+            # print(x_t1_1.shape, x_t1_k.shape,x_t1.shape)
+            # assert False
 
-            x0 = ddim_res["x0"].detach()
+            
+            ddim_res = self.DDIM_backward( # denoise
+                num_inference_steps=num_inference_steps, timesteps=timesteps, skip_t=t1, t0=-1, t1=-1, do_classifier_free_guidance=do_classifier_free_guidance,
+                null_embs=null_embs, text_embeddings=text_embeddings, latents_local=x_t1, latents_dtype=dtype, guidance_scale=guidance_scale,
+                guidance_stop_step=guidance_stop_step, callback=callback, callback_steps=callback_steps, extra_step_kwargs=extra_step_kwargs, num_warmup_steps=num_warmup_steps)
+
+            x0 = ddim_res["x0"].detach()  # (1,4,8,64,64)
+            # print(x0.shape)
+            # assert False
             del ddim_res
             del x_t1
             del x_t1_1
@@ -420,7 +455,7 @@ class TextToVideoPipeline(StableDiffusionPipeline):
                     mask = T.Resize(
                         size=(h, w), interpolation=T.InterpolationMode.NEAREST)(m_f[None])
                     kernel = torch.ones(5, 5, device=x0.device, dtype=x0.dtype)
-                    mask = dilation(mask[None].to(x0.device), kernel)[0]
+                    mask = dilation(mask[None].to(x0.device), kernel)[0]  # gkf: 图像处理中的morphological（形态学）运算，这里是腐蚀膨胀运算中的膨胀
                     M_FG[batch_idx, frame_idx, :, :] = mask
 
             x_t1_1_fg_masked = x_t1_1 * \
